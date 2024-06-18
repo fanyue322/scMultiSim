@@ -1,417 +1,398 @@
-# Parameters:
-# ncells, n_nd_cif, n_diff_cif, n_reg_cif,
-# cif_center, cif_sigma,
-# neutral, phyla, tree_info,
-# use_impulse
+.default <- \(...) list(FALSE, as.character(enexprs(...)), ...)
+.required <- list(TRUE)
 
+.should.be.logical <- list(
+  is.logical,
+  "The value should be a logical."
+)
 
-# called by .continuousCIF() to generate the CIF for a continuous population
-.continuousCIFParam <- function(is_spatial, ...) {
-  if (is_spatial) {
-    .continuousCIFParamSpatial(...)
-  } else {
-    .continuousCIFParamNormal(...)
-  }
+.should.be.int <- list(
+  \(x) x %% 1 == 0,
+  "The value should be a numeric."
+)
+
+.should.be.int.between <- function(a, b) list(
+  \(x) x %% 1 == 0 && x >= a && x <= b,
+  sprintf("The value should be an integer between %g and %g.", a, b)
+)
+
+.should.be.num <- list(
+  is.numeric,
+  "The value should be a numeric."
+)
+
+.should.be.num.between <- function(a, b) list(
+  \(x) is.numeric(x) && x >= a && x <= b,
+  sprintf("The value should be a numeric between %g and %g.", a, b)
+)
+
+.choose_from <- function(...) {
+  opts <- list(...)
+  list(
+    \(x) x %in% opts,
+    sprintf("The value should be one of [%s].", do.call(paste, c(opts, sep = ", ")))
+  )
 }
 
 
-# generate the CIF for a continuous population, when spatial mode is enabled
-# @return a list of cif, diff_cif_by_path, meta_by_path, layer_idx_by_path
-.continuousCIFParamSpatial <- function(
-  ncells, N_nd.cif, N_diff.cif, n_reg_cif,
-  cif_center, cif_sigma, step_size,
-  neutral, phyla, tree_info,
-  use_impulse, sp_params, ...
-) {
-  # paths: list of int vector, each path
-  # cell_path: int vector, the path idx of each cell
-  # path_len: int vector, the length of each path
-  param_names <- c("kon", "koff", "s")
+# ==============================================================================
+# OPTIONS: each option should be a list(default, checker, description)
+# ==============================================================================
 
-  sp_params %->% c(
-    max_layers, paths, cell_path, path_len
+.opt_list <- function() list(
+  "GENERAL",
+  rand.seed                                                              = list(
+    .default(0),
+    .should.be.int,
+    "scMultiSim should produce the same result if all other parameters are the same."
+  ),
+  threads                                                                = list(
+    .default(1),
+    .should.be.int.between(1, 4096),
+    "Set to larger than 1 to use multithreading for some part of the simulation."
+  ),
+  # ========================== Gene ============================================
+  "GENE",
+  GRN                                                                    = list(
+    .default(NULL),
+    list(
+      \(x) (length(x) == 1 && is.na(x)) || (is.data.frame(x) && ncol(x) >= 3 && is.numeric(x[[3]])),
+      "It should be a data frame with 3 columns (target, regulator, effect). Supply NA to disable the GRN effect."
+    ),
+    "The GRN network."
+  ),
+  num.genes                                                              = list(
+    .default(NULL),
+    .should.be.int.between(1, Inf),
+    "Number of genes if GRN is disabled."
+  ),
+  unregulated.gene.ratio                                                 = list(
+    .default(0.1),
+    .should.be.num.between(0, 1),
+    "Ratio of unreulated to regulated genes. Extra unregulated genes will be simulated in addition to the genes in GRN."
+  ),
+  giv.mean                                                               = list(
+    .default(0),
+    .should.be.num.between(-Inf, Inf),
+    "Mean of the Gene Identity Vectors."
+  ),
+  giv.prob                                                               = list(
+    .default(0.3),
+    .should.be.num.between(0, 1),
+    "Probability of non-zero values in the Gene Identity Vectors."
+  ),
+  giv.sd                                                                 = list(
+    .default(1),
+    .should.be.num.between(0, Inf),
+    "Stddev of the Gene Identity Vectors."
+  ),
+  hge.range                                                              = list(
+    .default(1),
+    .should.be.num.between(1, Inf),
+    "Only choose highly expressed genes after this range."
+  ),
+  hge.prop                                                               = list(
+    .default(0),
+    .should.be.num.between(0, 1),
+    "Propotion of highly expressed genes."
+  ),
+  hge.mean                                                               = list(
+    .default(5),
+    .should.be.num.between(1, Inf),
+    "Scale of highly expressed genes."
+  ),
+  hge.sd                                                                 = list(
+    .default(1),
+    .should.be.num.between(0, Inf),
+    "Variation of highly expressed genes."
+  ),
+  hge.max.var                                                            = list(
+    .default(500),
+    .should.be.num.between(0, Inf),
+    "Genes with higher variation will not be selected as highly expressed genes."
+  ),
+  dynamic.GRN                                                            = list(
+    .default(NA),
+    NULL,
+    "Specification of the dynamic GRN. See scmultisim_help(\"dynamic.GRN\") for details."
+  ),
+  # ========================== Cell ============================================
+  "CELL",
+  num.cells                                                              = list(
+    .default(1000),
+    .should.be.int.between(0, Inf),
+    "Total number of cells from all populations."
+  ),
+  tree                                                                   = list(
+    .default(Phyla5()),
+    NULL,
+    "A tree defining relationship between populations."
+  ),
+  discrete.cif                                                           = list(
+    .default(FALSE),
+    .should.be.logical,
+    "Whether the cell population is discrete."
+  ),
+  discrete.pop.size                                                      = list(
+    .default(NA),
+    list(
+      \(x) (length(x) == 1 && is.na(x)) || all(is.integer(x)),
+      "the value should be an integer vector"
+    ),
+    "Specify the cell numbers in each population."
+  ),
+  discrete.min.pop.size                                                  = list(
+    .default(70),
+    .should.be.int,
+    "Size of the smallest discrete cell population."
+  ),
+  discrete.min.pop.index                                                 = list(
+    .default(1),
+    .should.be.int.between(0, Inf),
+    "Index of the smallest discrete cell population."
+  ),
+  num.cifs                                                               = list(
+    .default(50),
+    .should.be.int,
+    "Number of Cell Identity Factors for each kinetic parameter."
+  ),
+  diff.cif.fraction                                                      = list(
+    .default(0.9),
+    .should.be.num.between(0, 1),
+    "Fraction of CIFs which are differential factors between cell types."
+  ),
+  cif.center                                                             = list(
+    .default(1),
+    .should.be.num,
+    "Mean of the CIF values."
+  ),
+  cif.sigma                                                              = list(
+    .default(0.1),
+    .should.be.num.between(0, Inf),
+    "Stddev of the CIF values."
+  ),
+  use.impulse                                                            = list(
+    .default(FALSE),
+    .should.be.logical,
+    "Use the impulse model when generating the continuous CIF."
+  ),
+  # ========================== ATAC ============================================
+  "SIMULATION - ATAC",
+  atac.effect                                                            = list(
+    .default(0.5),
+    .should.be.num.between(0, 1),
+    "The influence of chromatin accessability data on gene expression."
+  ),
+  region.distrib                                                         = list(
+    .default(c(0.1, 0.5, 0.4)),
+    list(
+      \(x) x > 0 && length(x) == 3 && sum(x) == 1,
+      "the value should be a vector with 3 elements sum to 1"
+    ),
+    "The probability that a gene is regulated by respectively 0, 1, 2 consecutive regions."
+  ),
+  atac.p_zero                                                            = list(
+    .default(0.8),
+    NULL,
+    "The proportion of 0s we see in the ATAC-seq data."
+  ),
+  riv.mean                                                               = list(
+    .default(0),
+    .should.be.num.between(0, Inf),
+    "Mean of the Region Identity Vectors."
+  ),
+  riv.prob                                                               = list(
+    .default(0.3),
+    .should.be.num.between(0, 1),
+    "Probability of non-zero values in the Region Identity Vectors."
+  ),
+  riv.sd                                                                 = list(
+    .default(1),
+    .should.be.num.between(0, Inf),
+    "Stddev of the Region Identity Vectors."
+  ),
+  # ========================== Simulation ======================================
+  "SIMULATION - RNA",
+  vary                                                                   = list(
+    .default("s"),
+    .choose_from("all", "kon", "koff", "s", "except_kon", "except_koff", "except_s"),
+    "Which kinetic parameters have differential CIFs."
+  ),
+  bimod                                                                  = list(
+    .default(0),
+    .should.be.num.between(0, 1),
+    "Adjust the bimodality of gene expression, thus controlling intrinsic variation."
+  ),
+  scale.s                                                                = list(
+    .default(1),
+    NULL,
+    "Scale of the s parameter. Use smaller value for cell types known to be small (like naive cells). When discrete.cif = T, it can be a vector specifying the scale.s for each cluster."
+  ),
+  intrinsic.noise                                                        = list(
+    .default(1),
+    .should.be.num.between(0, 1),
+    "The weight assigned to the random sample from the Beta-Poisson distribution, where the weight of the Beta-Poisson mean value is given a weight of (1 - intrinsic.noise)."
+  ),
+  # ========================== Kinetic Model ===================================
+  "SIMULATION - KINETIC MODEL",
+  do.velocity                                                            = list(
+    .default(FALSE),
+    .should.be.logical,
+    "Simulate using the whole kinetic model and generate RNA velocity data."
+  ),
+  beta                                                                   = list(
+    .default(0.4),
+    .should.be.num,
+    "Splicing rate of each gene in the kinetic model."
+  ),
+  d                                                                      = list(
+    .default(1),
+    .should.be.num,
+    "Degradation rate of each gene in the kinetic model."
+  ),
+  num.cycles                                                             = list(
+    .default(3),
+    .should.be.int.between(1, Inf),
+    "For velocity mode, the number of cycles run before sampling the gene expression of a cell."),
+  cycle.len                                                              = list(
+    .default(1),
+    .should.be.num.between(0, Inf),
+    "For velocity mode, a factor multiplied by the expected time to transition from kon to koff and back to form the the length of a cycle."
+  ),
+  # ========================== Spatial =========================================
+  "SIMULATION - SPATIAL",
+  cci                                                                    = list(
+    .default(NA),
+    list(
+      \(x) is.list(x) && is.data.frame(x[["params"]]),
+      "Enables cell-cell interaction. See scmultisim_help(\"cci\") for details."
+    ),
+    "The regulation network for spatial cell-cell interaction."
   )
+)
 
-  # nd and reg cif
-  cif <- foreach(i_cell = seq(ncells)) %do% {
-    i_path <- cell_path[i_cell]
-    n_layers <- path_len[i_path]
-
-    if (i_cell %% 100 == 0) cat(sprintf("%i..", i_cell))
-    # for each cell, generate n_layer x n_cif
-    cif_cell <- lapply(seq_len(3), function(i) {
-      param_name <- param_names[i]
-      n_nd_cif <- N_nd.cif[i]
-      n_diff_cif <- N_diff.cif[i]
-
-      # nd cif
-      nd_cif <- lapply(seq(n_nd_cif), \(icif) rnorm(n_layers, cif_center, cif_sigma)) %>% do.call(cbind, .)
-      colnames(nd_cif) <- paste(param_name, "nonDE", seq(n_nd_cif), sep = "_")
-
-      # diff cif
-      need_diff_cif <- n_diff_cif > 0
-      # for cell 1, output the diff_cif itself; for other cells, only output TRUE or FALSE
-      diff_cif <- need_diff_cif
-      if (need_diff_cif && i_cell == 1) {
-        # diff cif is shared among all cell & layers; generate them lazily
-        # make sure only generated once for kon, koff and s
-        # n_layers x n_diff_cif
-        # =============================================== COPY
-        diff_cif <- if (use_impulse) {
-          c(edges, root, tips, internal) %<-% tree_info
-          # impulse model
-          # pdf(file = .plot.name, width = 15, height = 5)
-          tip <- rep(tips, ceiling(n_diff_cif / length(tips)))
-          lapply(seq(n_diff_cif), function(cif_i) {
-            impulse <- Impulsecifpertip(phyla, edges, root, tips, internal, neutral, tip[cif_i], cif_sigma, cif_center, step_size)
-            # if (.plot) { PlotRoot2Leave(impulse, tips, edges, root, internal) }
-            re_order <- match(
-              apply(neutral[, seq_len(3)], 1, \(X) paste0(X, collapse = "_")),
-              apply(impulse[, seq_len(3)], 1, \(X) paste0(X, collapse = "_"))
-            )
-            return(impulse[re_order,])
-          })
-          # dev.off()
-        } else {
-          # Gaussian sample
-          lapply(seq(n_diff_cif), function(icif) {
-            # supply neutral to have the same t_sample values for all cells
-            SampleSubtree(tree_info$root, 0, cif_center, tree_info$edges, ncells, step_size, neutral = neutral)[, 4]
-          }) %>%
-            do.call(cbind, .) %>%
-            .[seq(max_layers),]
+# utils: check if the option is valid
+.check_opt <- function(options) {
+  opt_list <- .opt_list()
+  opt_list <- opt_list[!vapply(opt_list, is.character, logical(1))]
+  for (name in names(opt_list)) {
+    c(val, checker, desc) %<-% opt_list[[name]]
+    required <- val[[1]]
+    user_val <- options[[name]]
+    if (is.null(user_val)) {
+      # if option not exist
+      if (required) {
+        abort(sprintf("ERROR: Option '%s' is required.\n%s", name, desc))
+      } else {
+        # assign default value
+        options[[name]] <- val[[3]]
+      }
+    } else {
+      # check the value    
+      if (!is.null(checker)) {
+        c(check, err_msg) %<-% checker
+        if (!check(user_val)) {
+          abort(sprintf("ERROR: Option '%s' is invalid.\n%s", name, err_msg))
         }
-        colnames(diff_cif) <- paste(param_name, "DE", seq(n_diff_cif), sep = "_")
-        # ================================================ COPY
-
-        diff_cif
       }
-
-      # reg cif
-      reg_cif <- NULL
-      if (i <= 2 && n_reg_cif > 0) {
-        reg_cif <- lapply(
-          seq(n_reg_cif),
-          \(.) rnorm(n_layers, cif_center, cif_sigma)
-        ) %>% do.call(cbind, .)
-        colnames(reg_cif) <- paste(param_name, "reg", seq(n_reg_cif), sep = "_")
-      }
-
-      # TRUE if diff_cif is needed to be combined later
-      list(nd = nd_cif, diff = diff_cif, reg = reg_cif)
-    })
-
-    setNames(cif_cell, param_names)
-  }
-
-  cat("Done\n")
-  # gather diff_cif
-  diff_cif_all <- list(NULL, NULL, NULL)
-  for (i in seq_len(3)) {
-    d_cif <- cif[[1]][[i]]$diff
-    if (!is.logical(d_cif)) {
-      # if this param has diff cif, move it to diff_cif_all and replace it as FALSE
-      diff_cif_all[[i]] <- d_cif
-      cif[[1]][[i]]$diff <- TRUE
     }
   }
+  
+  options
+}
 
-  # get the index on each path
-  neutral <- neutral[seq(max_layers),]
-  layer_idx_by_path <- lapply(paths, function(path) {
-    idx <- integer()
-    for (i in seq(length(path) - 1)) {
-      a <- path[i]
-      b <- path[i + 1]
-      idx <- c(idx, which(neutral[, 1] == a & neutral[, 2] == b))
-    }
-    idx
-  })
 
-  # now process diff cif
-  diff_cif_by_path <- lapply(diff_cif_all, function(d_cif) {
-    lapply(seq_along(paths), function(i_path) {
-      if (is.null(d_cif)) return(NULL)
-      d_cif[layer_idx_by_path[[i_path]],]
-    })
-  })
-  names(diff_cif_by_path) <- param_names
+# manually add line breaks to a long string after 72 characters
+.split_long_string <- function(x) {
+  if (!is.character(x)) return(NULL)
+  ss <- strsplit(x, "(?<=.{72})", perl = TRUE)[[1]]
+  do.call(paste, c(as.list(ss), sep = "\n\t"))
+}
 
-  # cell types & meta
-  cell_types <- character(length = nrow(neutral))
-  for (i in seq(nrow(tree_info$edges))) {
-    c(id, from, to, len) %<-% tree_info$edges[i,]
-    n_steps <- len %/% step_size + ceiling(len %% step_size)
-    pts <- which(neutral[, 1] == from & neutral[, 2] == to)
-    n_pts <- length(pts)
-    cell_types[pts] <- if (n_steps == 1) {
-      paste(from, to, sep = "_")
+
+# utils: print the option list
+.print_opt <- function(name = NULL) {
+  opt_list <- .opt_list()
+  names <- names(opt_list)
+  
+  opts <- if (is.null(name)) {
+    seq_along(names)
+  } else {
+    which(names %in% name)
+  }
+  
+  if (is.null(opts) || length(opts) == 0) {
+    stop(sprintf("Option %s doesn't exist.\n", name))
+  }
+  
+  for (i in opts) {
+    n <- names[i]
+    opt <- opt_list[[i]]
+    if (n == "") {
+      sprintf("\n[%s]\n\n", opt) %>% cat()
     } else {
-      type_id <- ceiling(seq(n_pts) * (n_steps / n_pts))
-      paste(from, to, type_id, sep = "_")
+      c(val, checker, desc) %<-% opt
+      if (val[[1]]) {
+        sprintf("%s  (required)\n", n) %>% cat()
+      } else {
+        sprintf("%s  (default: %s)\n", n, val[[2]]) %>% cat()
+      }
+      sprintf("\t%s\n", .split_long_string(desc)) %>% cat()
+      sprintf("\t%s\n", .split_long_string(checker[[2]])) %>% cat()
     }
   }
+}
 
-  meta_by_path <- lapply(seq_along(paths), function(i_path) {
-    idx <- layer_idx_by_path[[i_path]]
-    n <- neutral[idx,]
-    data.frame(
-      pop = apply(n[, seq_len(2)], 1, \(X) paste0(X, collapse = "_")),
-      depth = n[, 3],
-      cell.type = cell_types[idx]
-    )
-  })
 
-  for (d_cif in diff_cif_by_path) {
-    for (i in seq_along(paths)) {
-      if (is.null(d_cif[[i]])) next
-      stopifnot(nrow(d_cif[[i]]) == path_len[i])
-    }
+#' Get option from an object in the current environment
+#'
+#' @param ... the parameter name
+#' @param .name get option from this object
+#'
+#' @return the parameter value
+OP <- function(..., .name = 'options') {
+  options <- get(.name, envir = caller_env())
+  k <- as.character(dplyr::expr(...))
+  if (!(k %in% names(options))) {
+    stop(sprintf("Option %s is required but not presented.", k))
+  }
+  options[[k]]
+}
+
+
+# print the help message for dynamic grn params
+.dynamic_grn_default_params <- function(help = FALSE) {
+  if (help) {
+    cat("Dynamic GRN deletes and creates some edges in the GRN in each epoch.
+One epoch contains multiple steps, and the change is done gradually in steps.
+The specific GRN at each step will be used by one or more cells sequentially.
+When an epoch is done, another epoch will start.
+
+Available options for dynamic.GRN:
+  - seed: the random seed
+  - num.steps: number of steps in each epoch.
+  - cell.per.step: how many cells share the GRN in the same step.
+  - involved.genes: a new edge will only be created within these specified genes.
+      The default value is NA, which will use all existing genes in the GRN.
+  - num.changing.edges: if < 1, it means the portion of edges added/deleted in each epoch.
+      if >= 1, it means the number of edges added/deleted in each epoch.
+  - create.tf.edges: whether a new edge can connect two TFs in the GRN.
+  - weight.mean: the mean value of the weight for a newly created edge.
+      The default value is NA, meaning that it will use the mean value of the input GRN.
+  - weight.sd: the standard deviation of the weight for a newly created edge.
+
+See the returned list for the default values.
+")
   }
 
   list(
-    cif = cif, diff_cif_by_path = diff_cif_by_path,
-    meta_by_path = meta_by_path,
-    layer_idx_by_path = layer_idx_by_path
-  )
-}
-
-
-# generate the CIF for a continuous population, when spatial mode is disabled
-.continuousCIFParamNormal <- function(
-  ncells, N_nd.cif, N_diff.cif, n_reg_cif,
-  cif_center, cif_sigma, step_size,
-  neutral, phyla, tree_info,
-  use_impulse, ...
-) {
-  param_names <- c("kon", "koff", "s")
-
-  cif <- lapply(seq_len(3), function(i) {
-    param_name <- param_names[i]
-    n_nd_cif <- N_nd.cif[i]
-    n_diff_cif <- N_diff.cif[i]
-
-    # ========== de_cif ==========
-    nd_cif <- lapply(seq(n_nd_cif), \(icif) rnorm(ncells, cif_center, cif_sigma)) %>% do.call(cbind, .)
-    colnames(nd_cif) <- paste(param_name, "nonDE", seq(n_nd_cif), sep = "_")
-    cifs <- nd_cif
-
-    # ========== nd_cif ==========
-    if (n_diff_cif > 0) {
-      # generate de_cif if there exist de_cifs for the parameter we are looking at
-      diff_cif <- if (use_impulse) {
-        c(edges, root, tips, internal) %<-% tree_info
-        # impulse model
-        # pdf(file = .plot.name, width = 15, height = 5)
-        tip <- rep(tips, ceiling(n_diff_cif / length(tips)))
-        lapply(seq(n_diff_cif), function(cif_i) {
-          impulse <- Impulsecifpertip(phyla, edges, root, tips, internal, neutral, tip[cif_i], cif_sigma, cif_center, step_size)
-          # if (.plot) { PlotRoot2Leave(impulse, tips, edges, root, internal) }
-          re_order <- match(
-            apply(neutral[, seq_len(3)], 1, \(X) paste0(X, collapse = "_")),
-            apply(impulse[, seq_len(3)], 1, \(X) paste0(X, collapse = "_"))
-          )
-          return(impulse[re_order,])
-        })
-        # dev.off()
-      } else {
-        # Gaussian sample
-        lapply(seq(n_diff_cif), function(icif) {
-          # supply neutral to have the same t_sample values for all cells
-          SampleSubtree(tree_info$root, 0, cif_center, tree_info$edges, ncells, step_size, neutral = neutral)[, 4]
-        }) %>%
-          do.call(cbind, .) %>%
-          .[seq(ncells),]
-      }
-      colnames(diff_cif) <- paste(param_name, "DE", seq(n_diff_cif), sep = "_")
-      cifs <- cbind(nd_cif, diff_cif)
-    }
-
-    # ========== generate reg_cif for k_on, k_off ===========
-    if (i <= 2 && n_reg_cif > 0) {
-      reg_cif <- lapply(
-        seq_len(n_reg_cif),
-        \(.) rnorm(ncells, cif_center, cif_sigma)
-      ) %>% do.call(cbind, .)
-      colnames(reg_cif) <- paste(param_name, "reg", seq_len(n_reg_cif), sep = "_")
-      cifs <- cbind(cifs, reg_cif)
-    }
-
-    return(cifs)
-  })
-
-  names(cif) <- param_names
-  cif
-}
-
-
-.discreteCIFSpatial <- function(
-  seed, N, options, sim, ...
-) {
-  # set.seed(seed)
-  param_names <- c("kon", "koff", "s")
-
-  phyla <- OP("tree")
-  cif_center <- OP("cif.center")
-  cif_sigma <- OP("cif.sigma")
-  user_popsize <- OP("discrete.pop.size")
-  min_popsize <- OP("discrete.min.pop.size")
-  i_minpop <- OP("discrete.min.pop.index")
-
-  npop <- length(phyla$tip.label)
-  if (!is.null(sim$ncells_pop)) {
-    ncells_pop <- sim$ncells_pop
-  } else if (npop == 1) {
-    ncells_pop <- N$cell
-  } else if (is.integer(user_popsize)) {
-    stopifnot(length(user_popsize) == npop)
-    stopifnot(sum(user_popsize) == N$cell)
-    ncells_pop <- user_popsize
-  } else {
-    ncells_pop <- rep(min_popsize, npop)
-    if (N$cell < min_popsize * npop) {
-      stop(sprintf(
-        "The size of the smallest population (%g * %g) is too big for the total number of cells (%g)",
-        min_popsize, npop, N$cell))
-    }
-
-    larger_pops <- setdiff(seq(npop), i_minpop)
-    ncells_pop[larger_pops] <- floor((N$cell - min_popsize) / length(larger_pops))
-    leftover <- N$cell - sum(ncells_pop)
-    if (leftover > 0) {
-      temp <- sample(larger_pops, leftover, replace = FALSE)
-      ncells_pop[temp] <- ncells_pop[temp] + 1
-    }
-  }
-
-  if (is.null(sim$ncells_pop)) {
-    sim$ncells_pop <- ncells_pop
-  }
-
-  vcv_evf_mean <- vcv.phylo(phyla, corr = TRUE)
-  param_name <- c("kon", "koff", "s")
-
-  # nd and reg cif
-  cif <- foreach(i_cell = seq(N$cell)) %do% {
-    # === each cell ===
-    n_layers <- N$cell
-
-    # for each cell, generate n_layer x n_cif
-    cif_cell <- lapply(seq_len(3), function(i) {
-      param_name <- param_names[i]
-      n_nd_cif <- N$nd.cif[i]
-      n_diff_cif <- N$diff.cif[i]
-      need_diff_cif <- n_diff_cif > 0
-
-      # nd cif
-      nd_cif <- lapply(seq(n_nd_cif), \(icif) rnorm(n_layers, cif_center, cif_sigma)) %>% do.call(cbind, .)
-      colnames(nd_cif) <- paste(param_name, "nonDE", seq(n_nd_cif), sep = "_")
-
-      # reg cif
-      reg_cif <- NULL
-      if (i <= 2 && N$reg_cif > 0) {
-        reg_cif <- lapply(
-          seq(N$reg_cif),
-          \(.) rnorm(n_layers, cif_center, cif_sigma)
-        ) %>% do.call(cbind, .)
-        colnames(reg_cif) <- paste(param_name, "reg", seq(N$reg_cif), sep = "_")
-      }
-
-      list(nd = nd_cif, diff = need_diff_cif, reg = reg_cif)
-    })
-
-    setNames(cif_cell, param_names)
-    # === end: each cell ===
-  }
-
-
-  # diff cif
-  diff_cif <- lapply(seq_len(3), function(i) {
-    n_diff_cif <- N$diff.cif[i]
-    need_diff_cif <- n_diff_cif > 0
-    if (need_diff_cif) {
-      pop_diff_cif_mean <- MASS::mvrnorm(n_diff_cif, rep(cif_center, npop), vcv_evf_mean)
-      dcif <- lapply(seq(npop), function(ipop) {
-        evf <- vapply(seq(n_diff_cif), function(ievf) {
-          rnorm(ncells_pop[ipop], pop_diff_cif_mean[ievf, ipop], cif_sigma)
-        }, numeric(ncells_pop[ipop]))
-        return(evf)
-      }) %>% do.call(rbind, .)
-      colnames(dcif) <- rep("DE", n_diff_cif)
-      dcif
-    } else {
-      NULL
-    }
-  })
-  diff_cif <- setNames(diff_cif, param_names)
-
-  pop <- do.call(c, lapply(seq(npop), function(i) rep(i, ncells_pop[i])))
-
-  meta <- data.frame(
-    pop = pop, cell.type = pop, cell.type.idx = pop
-  )
-
-  list(
-    cif = cif,
-    meta = meta,
-    diff_cif = diff_cif
-  )
-}
-
-
-# return (node_from, node_to, t, state)
-SampleEdge <- function(edge, depth, anc_state, edges, ncells, step_size, t_sample = NA) {
-  if (is.na(t_sample[1])) {
-    #t_sample <- c(0,sort( runif(round(edge[4]*ncells/sum(edges[,4])),0,edge[4]) ))
-    branch_len <- edge[4]
-    ncell_branch <- ceiling(branch_len * ncells / sum(edges[, 4])) - 1
-    if (ncell_branch < 0) { stop("the total number of cells is too few.") }
-    t_sample <- c(0, seq(0, branch_len, branch_len / ncell_branch))
-    t_sample <- c(t_sample, branch_len)
-  } else {
-    t_sample <- sort(c(0, t_sample - depth))
-  }
-  t_interval <- diff(t_sample)
-  x_change <- vapply(t_interval, function(sig) rnorm(1, 0, sqrt(sig)),
-                     numeric(1))
-  x_sample <- cumsum(x_change)
-  col_time <- depth + t_sample[-1]
-  col_state <- anc_state + x_sample
-  # return
-  cbind(edge[2], edge[3], col_time, col_state)
-}
-
-SampleSubtree <- function(par, depth, anc_state, edges, ncells, step_size, neutral = NA) {
-  # get the children of the current node
-  children <- edges[edges[, 2] == par, 3]
-  result <- lapply(c(seq_along(children)), function(j) {
-    edge <- edges[edges[, 2] == par & edges[, 3] == children[j],] # given the parent and child, find the edge
-    if (sum(edges[, 2] == children[j]) == 0) { # this means the current node is a leaf
-      if (is.na(neutral[1])) {
-        result <- SampleEdge(edge, depth, anc_state, edges, ncells, step_size)
-      } else {
-        t_sample <- neutral[neutral[, 1] == edge[2] & neutral[, 2] == edge[3], 3]
-        result <- SampleEdge(edge, depth, anc_state, edges, ncells, step_size, t_sample)
-      }
-      result <- result[c(seq(length(result[, 1] - 1))),]
-    } else {
-      if (is.na(neutral[1])) {
-        result <- SampleEdge(edge, depth, anc_state, edges, ncells, step_size)
-      } else {
-        t_sample <- neutral[neutral[, 1] == edge[2] & neutral[, 2] == edge[3], 3]
-        result <- SampleEdge(edge, depth, anc_state, edges, ncells, step_size, t_sample)
-      }
-      anc_state <- result[length(result[, 1]), 4]
-      # !!! why this line
-      result <- result[c(seq(length(result[, 1] - 1))),]
-      depth <- depth + edge[4]
-      result1 <- SampleSubtree(children[j], depth, anc_state, edges, ncells, step_size, neutral)
-      result <- rbind(result, result1)
-    }
-    return(result)
-  })
-  result <- do.call(rbind, result)
-  colnames(result) <- c("from", "to", "time", "state")
-  rownames(result) <- NULL
-  return(result)
+    seed = 0,
+    num.steps = 200,
+    cell.per.step = 1,
+    involved.genes = NA,
+    num.changing.edges = 2,
+    create.tf.edges = FALSE,
+    weight.mean = NA,
+    weight.sd = 1
+  )  
 }
