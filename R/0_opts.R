@@ -1,4 +1,4 @@
-.default <- \(...) list(FALSE, as.character(enexprs(...)), ...)
+.default <- list(FALSE, as.character(enexprs(...)), ...)
 .required <- list(TRUE)
 
 .should.be.logical <- list(
