@@ -7,12 +7,12 @@
 )
 
 .should.be.int <- list(
-  \(x) x %% 1 == 0,
+  (x) x %% 1 == 0,
   "The value should be a numeric."
 )
 
 .should.be.int.between <- function(a, b) list(
-  \(x) x %% 1 == 0 && x >= a && x <= b,
+  (x) x %% 1 == 0 && x >= a && x <= b,
   sprintf("The value should be an integer between %g and %g.", a, b)
 )
 
@@ -22,14 +22,14 @@
 )
 
 .should.be.num.between <- function(a, b) list(
-  \(x) is.numeric(x) && x >= a && x <= b,
+  (x) is.numeric(x) && x >= a && x <= b,
   sprintf("The value should be a numeric between %g and %g.", a, b)
 )
 
 .choose_from <- function(...) {
   opts <- list(...)
   list(
-    \(x) x %in% opts,
+    (x) x %in% opts,
     sprintf("The value should be one of [%s].", do.call(paste, c(opts, sep = ", ")))
   )
 }
@@ -56,7 +56,7 @@
   GRN                                                                    = list(
     .default(NULL),
     list(
-      \(x) (length(x) == 1 && is.na(x)) || (is.data.frame(x) && ncol(x) >= 3 && is.numeric(x[[3]])),
+      (x) (length(x) == 1 && is.na(x)) || (is.data.frame(x) && ncol(x) >= 3 && is.numeric(x[[3]])),
       "It should be a data frame with 3 columns (target, regulator, effect). Supply NA to disable the GRN effect."
     ),
     "The GRN network."
@@ -136,7 +136,7 @@
   discrete.pop.size                                                      = list(
     .default(NA),
     list(
-      \(x) (length(x) == 1 && is.na(x)) || all(is.integer(x)),
+      (x) (length(x) == 1 && is.na(x)) || all(is.integer(x)),
       "the value should be an integer vector"
     ),
     "Specify the cell numbers in each population."
@@ -186,7 +186,7 @@
   region.distrib                                                         = list(
     .default(c(0.1, 0.5, 0.4)),
     list(
-      \(x) x > 0 && length(x) == 3 && sum(x) == 1,
+      (x) x > 0 && length(x) == 3 && sum(x) == 1,
       "the value should be a vector with 3 elements sum to 1"
     ),
     "The probability that a gene is regulated by respectively 0, 1, 2 consecutive regions."
@@ -264,7 +264,7 @@
   cci                                                                    = list(
     .default(NA),
     list(
-      \(x) is.list(x) && is.data.frame(x[["params"]]),
+      (x) is.list(x) && is.data.frame(x[["params"]]),
       "Enables cell-cell interaction. See scmultisim_help(\"cci\") for details."
     ),
     "The regulation network for spatial cell-cell interaction."
